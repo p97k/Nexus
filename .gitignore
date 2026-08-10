@@ -1,0 +1,20 @@
+# env
+.env
+.env.local
+web/.env.local
+
+# build artifacts
+bin/
+server/nexus
+
+# go
+server/vendor/
+
+# node
+web/node_modules/
+web/.next/
+web/out/
+
+# OS
+.DS_Store
+*.swp
