@@ -139,6 +139,9 @@ export async function getCashbackDashboard(): Promise<BankStat[]> {
 
 // ─── SSE ──────────────────────────────────────────────────────────────────────
 
+const STREAM_MAX_RECONNECTS = 8
+const STREAM_RECONNECT_BASE_MS = 1500
+
 export function createRunStream(
   runId: string,
   onEvent: (event: { type: string; payload: unknown }) => void,
@@ -147,29 +150,54 @@ export function createRunStream(
 ): () => void {
   const token = getToken()
   const url = `${BASE}/runs/${runId}/stream`
+  let closed = false
+  let attempts = 0
+  let reconnectTimer: ReturnType<typeof setTimeout> | null = null
+  let es: EventSource | null = null
 
-  const es = new EventSource(
-    url + (token ? `?token=${encodeURIComponent(token)}` : ''),
-  )
+  function open() {
+    if (closed) return
+    es = new EventSource(url + (token ? `?token=${encodeURIComponent(token)}` : ''))
 
-  es.onmessage = (e) => {
-    try {
-      const event = JSON.parse(e.data)
-      onEvent(event)
-      if (event.type === 'done' || event.type === 'error') {
-        es.close()
-        if (event.type === 'done') onDone()
-        else onError(new Error(JSON.stringify(event.payload)))
+    es.onmessage = (e) => {
+      try {
+        const event = JSON.parse(e.data)
+        onEvent(event)
+        if (event.type === 'done' || event.type === 'error') {
+          closed = true
+          es?.close()
+          if (event.type === 'done') onDone()
+          else onError(new Error(JSON.stringify(event.payload)))
+        }
+      } catch {
+        // ignore malformed
       }
-    } catch {
-      // ignore malformed
+    }
+
+    es.onerror = () => {
+      es?.close()
+      if (closed) return
+      // Transient drop (idle proxy, network blip) — the run keeps processing
+      // server-side, so reconnect with capped backoff instead of giving up.
+      attempts += 1
+      if (attempts > STREAM_MAX_RECONNECTS) {
+        closed = true
+        onError(new Error('Stream connection lost'))
+        return
+      }
+      const delay = Math.min(
+        STREAM_RECONNECT_BASE_MS * 2 ** Math.min(attempts - 1, 4),
+        20000,
+      )
+      reconnectTimer = setTimeout(open, delay)
     }
   }
 
-  es.onerror = () => {
-    es.close()
-    onError(new Error('Stream connection lost'))
-  }
+  open()
 
-  return () => es.close()
+  return () => {
+    closed = true
+    if (reconnectTimer) clearTimeout(reconnectTimer)
+    es?.close()
+  }
 }

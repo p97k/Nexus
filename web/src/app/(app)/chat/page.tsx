@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation'
 import {
   createRun,
   getAgent,
+  getRun,
   listAgents,
   listProjects,
   sendMessage,
@@ -63,6 +64,33 @@ export default function ChatPage() {
   useEffect(() => {
     scrollRef.current?.scrollTo({ top: scrollRef.current.scrollHeight, behavior: 'smooth' })
   }, [messages])
+
+  // Watchdog: SSE can be dropped (idle proxy, network blip) while the run keeps
+  // processing server-side. While streaming, poll run status + messages so the
+  // "Thinking" state always ends and the final answer is reconciled.
+  useEffect(() => {
+    if (!streaming || !run) return
+    const timer = setInterval(async () => {
+      try {
+        const [runStatus, msgs] = await Promise.all([
+          getRun(run.id),
+          getRunMessages(run.id),
+        ])
+        msgs.forEach(appendMsg)
+        if (runStatus.status === 'completed' || runStatus.status === 'failed') {
+          setStreaming(false)
+          stopStreamRef.current?.()
+          stopStreamRef.current = null
+          if (runStatus.status === 'failed') {
+            setError('Run failed while the connection was down.')
+          }
+        }
+      } catch {
+        // transient — keep polling
+      }
+    }, 3000)
+    return () => clearInterval(timer)
+  }, [streaming, run])
 
   function appendMsg(msg: Message) {
     setMessages((prev) => {

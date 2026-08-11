@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"time"
 
@@ -313,10 +314,17 @@ func (s *Server) streamRun(c *gin.Context) {
 	defer sink.Unsubscribe(ch)
 
 	ctx := c.Request.Context()
+	// Keep the connection alive during long model calls so idle-timeout
+	// proxies (e.g. Next dev) don't kill the stream mid-run.
+	heartbeat := time.NewTicker(15 * time.Second)
+	defer heartbeat.Stop()
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-heartbeat.C:
+			fmt.Fprint(c.Writer, ": ping\n\n")
+			c.Writer.Flush()
 		case ev, ok := <-ch:
 			if !ok {
 				return

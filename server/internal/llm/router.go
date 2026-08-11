@@ -61,10 +61,16 @@ func (r *Router) Complete(ctx context.Context, provider, model string, messages 
 
 // CompleteWithFallback tries each candidate in order and returns the first
 // successful response. It never returns a partial result: only a success or a
-// combined error after every candidate has failed.
-func (r *Router) CompleteWithFallback(ctx context.Context, candidates []Candidate, messages []Message, tools []ToolDef) (*Response, error) {
+// combined error after every candidate has failed. Each failure is reported to
+// onFail (optional) so callers can log why the primary models are failing.
+func (r *Router) CompleteWithFallback(ctx context.Context, candidates []Candidate, messages []Message, tools []ToolDef, onFail ...func(c Candidate, err error)) (*Response, error) {
 	var errs []string
 	seen := map[string]bool{}
+	report := func(c Candidate, err error) {
+		for _, f := range onFail {
+			f(c, err)
+		}
+	}
 	for _, c := range candidates {
 		if c.Provider == "" {
 			continue
@@ -73,6 +79,7 @@ func (r *Router) CompleteWithFallback(ctx context.Context, candidates []Candidat
 			c.Model = r.DefaultModelFor(c.Provider)
 		}
 		if c.Model == "" {
+			report(c, fmt.Errorf("model unset"))
 			errs = append(errs, c.Provider+"/<unset>")
 			continue
 		}
@@ -85,6 +92,7 @@ func (r *Router) CompleteWithFallback(ctx context.Context, candidates []Candidat
 		if err == nil {
 			return resp, nil
 		}
+		report(c, err)
 		if ctx.Err() != nil {
 			return nil, ctx.Err()
 		}

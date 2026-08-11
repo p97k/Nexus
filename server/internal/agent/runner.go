@@ -206,7 +206,11 @@ func (r *Runner) Execute(ctx context.Context, opts RunOptions) error {
 		}
 		run.StepCount++
 
-		llmResp, err := r.llmR.CompleteWithFallback(ctx, r.fallbackCandidates(run, agent), conversation, toolDefs)
+		llmResp, err := r.llmR.CompleteWithFallback(ctx, r.fallbackCandidates(run, agent), conversation, toolDefs,
+			func(c llm.Candidate, candidateErr error) {
+				slog.Warn("llm candidate failed", "run", run.ID, "step", step,
+					"candidate", c.Key(), "err", candidateErr)
+			})
 		if err != nil {
 			run.Status = domain.RunStatusFailed
 			r.store.UpdateRun(ctx, run)
