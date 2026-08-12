@@ -118,7 +118,10 @@ func (r *Runner) Execute(ctx context.Context, opts RunOptions) error {
 	agent := opts.Agent
 
 	run.Status = domain.RunStatusRunning
-	r.store.UpdateRun(ctx, run)
+	err := r.store.UpdateRun(ctx, run)
+	if err != nil {
+		return fmt.Errorf("store.UpdateRun: %w", err)
+	}
 
 	// Build the tool list for this agent (adapter_id matches the offline_cashback constant)
 	// We look up by the offline_cashback adapter ID; in future this comes from the project record.
